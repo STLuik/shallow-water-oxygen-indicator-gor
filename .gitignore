@@ -1,0 +1,42 @@
+# R session files
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# Raw input data
+Input/
+input/
+data/
+raw_data/
+master/
+
+# Generated outputs
+Output/
+output/*
+!output/.gitkeep
+figures/
+plots/
+
+# Generated data files
+*.csv
+*.xlsx
+*.rds
+*.RData
+*.pub
+
+# Generated figures
+*.jpg
+*.jpeg
+*.png
+*.pdf
+*.tif
+*.tiff
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db*.docx
