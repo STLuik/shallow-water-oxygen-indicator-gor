@@ -17,6 +17,7 @@ output/*
 !output/.gitkeep
 figures/
 plots/
+scripts/old
 
 # Generated data files
 *.csv
