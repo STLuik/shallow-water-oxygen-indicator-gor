@@ -3,9 +3,9 @@
 # Run this after script 08_2.
 #
 # Purpose:
-#   1. Put all yearly July-September DO debt profiles on one panel.
+#   1. Put all yearly selected-month DO debt profiles on one panel.
 #      x = DO debt, y = depth, colour/Z = year.
-#   2. Add a second panel with one July-September seasonal average per year
+#   2. Add a second panel with one selected-month seasonal average per year
 #      calculated from profile-deepest measured values. The script first finds
 #      the deepest valid DO-debt record per profile, keeps only profiles whose
 #      deepest selected record is >= 40 m, then averages those values by year.
@@ -54,8 +54,8 @@ rm(list = setdiff(ls(envir = .GlobalEnv), keep), envir = .GlobalEnv)
 #-------------------------------------------------------------------------------
 # USER SETTINGS
 
-# July-September.
-profile_months <- 7:9
+# Months used in seasonal profile/deep-value figures.
+profile_months <- 7:8
 
 # These settings should match scripts 08_1 and 08_2.
 seasonal_average_first <- TRUE
@@ -64,11 +64,11 @@ smooth_method <- "gam"
 # DO debt variable to use for the yearly profile panel.
 profile_variable_observed <- "Oxygen_debt_mgl_H2S_NH4"
 profile_variable_smoothed <- paste0(profile_variable_observed, "_smoothed")
-profile_variable_label <- "DO debt, H2S + NH4 (mg/l)"
+profile_variable_label <- "DO deficiency, H2S (mg/l)"
 
 # Variables for the measured deep-layer seasonal average panel.
 deepest_variables <- c(
-  Oxygen_debt_mgl_H2S_NH4 = "DO debt, H2S + NH4",
+  Oxygen_debt_mgl_H2S_NH4 = "DO deficiency, H2S",
   Oxygen_mgl = "DO",
   Temperature_degreesC = "Temperature",
   Salinity_psu = "Salinity"
@@ -115,6 +115,27 @@ make_months_label <- function(months) {
   paste0(sprintf("%02d", months), collapse = "_")
 }
 
+make_months_text <- function(months) {
+  months <- sort(unique(as.integer(months)))
+  months <- months[!is.na(months) & months >= 1 & months <= 12]
+
+  if (length(months) == 0) {
+    return("selected months")
+  }
+
+  month_names <- month.name[months]
+
+  if (length(months) == 1) {
+    return(month_names)
+  }
+
+  if (all(diff(months) == 1)) {
+    return(paste0(month_names[1], "-", month_names[length(month_names)]))
+  }
+
+  paste(month_names, collapse = ", ")
+}
+
 safe_mean <- function(x) {
   if (all(is.na(x))) {
     return(NA_real_)
@@ -146,6 +167,7 @@ check_required_cols <- function(data, required_cols, data_name) {
 
 profile_months <- sort(unique(as.integer(profile_months)))
 months_label <- make_months_label(profile_months)
+months_text <- make_months_text(profile_months)
 mode_label <- if (seasonal_average_first) "seasonal" else "monthly"
 
 # Script 08_1 saves the method as GAM, while some later scripts may use gam.
@@ -204,7 +226,7 @@ profile_data <- smoothed_profiles[
 data.table::setorder(profile_data, Year, Depth_m)
 
 if (nrow(profile_data) == 0) {
-  stop("No non-NA smoothed DO debt profile values were found.")
+  stop("No non-NA smoothed DO deficiency profile values were found.")
 }
 
 #-------------------------------------------------------------------------------
@@ -212,7 +234,7 @@ if (nrow(profile_data) == 0) {
 
 # Panel B logic:
 #   1. Use the original measured profile records, not monthly mean profile bins.
-#   2. Within July-September, find the deepest valid measured DO-debt record in
+#   2. Within the selected months, find the deepest valid measured DO-debt record in
 #      each profile.
 #   3. Keep only those profile-deepest records where the selected depth is
 #      >= deepest_min_depth_m.
@@ -371,7 +393,7 @@ corresponding_source <- measured_season[
 
 if (nrow(corresponding_source) == 0) {
   stop(
-    "No non-NA DO debt observations found for selected months ",
+    "No non-NA DO deficiency observations found for selected months ",
     months_label,
     "."
   )
@@ -407,7 +429,7 @@ profile_deepest_corresponding <- profile_deepest_corresponding[
 
 if (nrow(profile_deepest_corresponding) == 0) {
   stop(
-    "No profile-deepest DO debt observations were measured at depths >= ",
+    "No profile-deepest DO deficiency observations were measured at depths >= ",
     deepest_min_depth_m,
     " m for selected months ",
     months_label,
@@ -586,7 +608,7 @@ corresponding_long <- data.table::melt(
 corresponding_long <- corresponding_long[!is.na(value)]
 corresponding_long[, parameter := unname(panel_b_variable_labels[as.character(variable)])]
 corresponding_long <- corresponding_long[!is.na(parameter)]
-corresponding_long[, value_source := "Profile-deepest seasonal average corresponding to DO debt"]
+corresponding_long[, value_source := "Profile-deepest seasonal average corresponding to DO deficiency"]
 corresponding_long[, parameter := factor(parameter, levels = unname(panel_b_variable_labels))]
 data.table::setorder(corresponding_long, parameter, Year)
 
@@ -633,8 +655,8 @@ if (nrow(corresponding_long) == 0) {
 smoothed_profile_values_wide <- profile_data[
   ,
   .(
-    figure_panel = "A. Yearly July-September DO debt profiles",
-    value_source = "Smoothed seasonal DO debt profile",
+    figure_panel = paste0("A. Yearly ", months_text, " DO deficiency profiles"),
+    value_source = "Smoothed seasonal DO deficiency profile",
     Year,
     Depth_m,
     months_included = months_label,
@@ -672,7 +694,7 @@ message("Smoothed profile values wide table saved: ", smoothed_profile_values_wi
 deep_measured_seasonal_values_wide[
   ,
   `:=`(
-    figure_panel = "B. Deep profile-deepest July-September measured seasonal averages",
+    figure_panel = paste0("B. Deep profile-deepest ", months_text, " measured seasonal averages"),
     months_included = months_label,
     min_depth_m_for_panel_b = deepest_min_depth_m
   )
@@ -741,11 +763,11 @@ message("Deep measured profile-deepest seasonal average values wide table saved:
 # FIGURE: FOUR-PANEL SELECTED DEEP VALUES WITH 1980-2010 PERCENTILES
 
 # This figure uses the selected deep yearly values from Panel B, i.e. the
-# profile-deepest July-September values averaged per year after keeping only
+# profile-deepest selected-month values averaged per year after keeping only
 # profiles whose selected deepest DO-debt record was measured at >= 40 m.
 deep_values_4panel_labels <- c(
   Oxygen_mgl = "DO",
-  DO_debt_measured_mgl = "DO debt, H2S + NH4",
+  DO_debt_measured_mgl = "DO deficiency, H2S",
   Salinity_psu = "Salinity",
   Temperature_degreesC = "Temperature"
 )
@@ -895,7 +917,9 @@ p_deep_values_4panel <- ggplot2::ggplot(
     x = "Year",
     y = "Seasonal average value",
     title = paste0(
-      "Selected deep July-September values from ",
+      "Selected deep ",
+      months_text,
+      " values from ",
       deep_values_plot_start_year,
       " onward"
     ),
@@ -972,7 +996,7 @@ p_profile <- ggplot2::ggplot(
     x = profile_variable_label,
     y = "Depth (m)",
     colour = "Year",
-    title = "A. Yearly July-September DO debt profiles"
+    title = paste0("A. Yearly ", months_text, " DO deficiency profiles")
   ) +
   ggplot2::theme_bw() +
   ggplot2::theme(
@@ -1013,7 +1037,7 @@ p_deepest <- ggplot2::ggplot() +
   ggplot2::scale_colour_manual(
     name = "Value type",
     values = c(
-      "Profile-deepest seasonal average corresponding to DO debt" = "black",
+      "Profile-deepest seasonal average corresponding to DO deficiency" = "black",
       "Additional profile-deepest seasonal average T/S without DO" = "blue"
     ),
     drop = FALSE
@@ -1022,7 +1046,9 @@ p_deepest <- ggplot2::ggplot() +
     x = "Year",
     y = "Value",
     title = paste0(
-      "B. July-September averages of profile-deepest records at depths >= ",
+      "B. ",
+      months_text,
+      " averages of profile-deepest records at depths >= ",
       deepest_min_depth_m,
       " m"
     )

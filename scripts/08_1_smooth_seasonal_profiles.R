@@ -3,7 +3,7 @@
 # It is intended as a simpler DIVA-like exploratory analysis, but it is not DIVA/ODV.
 #
 # Main idea:
-#   1. Read monthly mean profiles created by scripts/08_monthly_mean_deep_data.R.
+#   1. Read monthly mean profiles created by script 08_0.
 #   2. Optionally average selected months first, e.g. July-October -> one seasonal profile per year.
 #   3. Fit a smooth 2D surface through time and depth using a GAM.
 #   4. Predict a smooth field for all year-depth or month-depth grid cells.
@@ -19,70 +19,55 @@ if (is.null(getOption("project_assessment"))) {
 
 assessment <- getOption("project_assessment")
 
+if (is.null(assessment$settings_file) || !file.exists(assessment$settings_file)) {
+  source("scripts/03_define_assessment.R")
+  assessment <- getOption("project_assessment")
+}
+
+assessment <- readRDS(assessment$settings_file)
+options(project_assessment = assessment)
+
+if (is.null(assessment$indicator)) {
+  stop("The assessment settings object does not contain indicator settings. Run scripts/03_define_assessment.R first.")
+}
+
+indicator <- assessment$indicator
+
 # Define paths
-inputPath <- "Input/master"
+inputPath <- assessment$master_input_dir
 outputPath <- assessment$output_dir
 
 # Remove unnecessary data/values/functions
 keep <- c(
-  "assessment", "outputPath", "inputPath", "proj",
+  "assessment", "indicator", "outputPath", "inputPath", "proj",
   "repo_url", "O2satFun", "auxilliaryFile"
 )
 
 rm(list = setdiff(ls(envir = .GlobalEnv), keep), envir = .GlobalEnv)
 
 #-------------------------------------------------------------------------------
-# USER SETTINGS
+# SETTINGS FROM scripts/03_define_assessment.R
 
-# Months to include.
-# Examples:
-#   profile_smooth_months <- 7:10
-#   profile_smooth_months <- c(8, 9)
-#   profile_smooth_months <- 6:11
-profile_smooth_months <- 7:9
+profile_smooth_months <- indicator$smoothing$profile_smooth_months
+seasonal_average_first <- indicator$smoothing$seasonal_average_first
+smooth_variables <- indicator$smoothing$smooth_variables
+max_depth_for_smoothing <- indicator$smoothing$max_depth_for_smoothing
+smooth_method <- indicator$smoothing$smooth_method
 
-# If TRUE, selected months are averaged first, giving one profile per year.
-# This is recommended for a seasonal indicator such as July-October.
-# If FALSE, the model uses monthly profiles directly.
-seasonal_average_first <- TRUE
+gam_k_time <- indicator$smoothing$gam_k_time
+gam_k_depth <- indicator$smoothing$gam_k_depth
+gam_method <- indicator$smoothing$gam_method
+min_observations_for_gam <- indicator$smoothing$min_observations_for_gam
 
-# Variables to smooth and plot.
-smooth_variables <- c(
-  "Oxygen_mgl",
-  "Oxygen_debt_mgl_H2S_NH4",
-  "Temperature_degreesC",
-  "Salinity_psu"
-)
+apply_distance_mask <- indicator$smoothing$apply_distance_mask
+max_time_gap_years <- indicator$smoothing$max_time_gap_years
+max_depth_gap_m <- indicator$smoothing$max_depth_gap_m
+max_scaled_distance <- indicator$smoothing$max_scaled_distance
 
-# Optional maximum depth shown/smoothed.
-# Set to NULL to use full depth range.
-max_depth_for_smoothing <- NULL
-
-# Smoothing method.
-# Current implemented option: "gam".
-smooth_method <- "gam"
-
-# GAM settings.
-# Smaller k values = smoother fields. Larger k values = more detail, but more risk of overfitting.
-gam_k_time <- 12
-gam_k_depth <- 10
-gam_method <- "REML"
-min_observations_for_gam <- 20
-
-# Distance mask to avoid retaining predictions far away from observations.
-apply_distance_mask <- TRUE
-max_time_gap_years <- 5
-max_depth_gap_m <- 10
-max_scaled_distance <- 1
-
-# Figure settings.
-figure_width <- 14
-figure_height <- 10
-figure_dpi <- 300
-
-# Colour palette for profile figures.
-# Options: "parula", "jet", "viridis", "heat".
-profile_colour_palette <- "jet"
+figure_width <- indicator$smoothing$figure_width
+figure_height <- indicator$smoothing$figure_height
+figure_dpi <- indicator$smoothing$figure_dpi
+profile_colour_palette <- indicator$smoothing$profile_colour_palette
 
 #-------------------------------------------------------------------------------
 # READ DATA
@@ -96,7 +81,7 @@ monthly_profiles_file <- file.path(outputPath, "monthly_mean_profiles_1m.csv")
 if (!file.exists(monthly_profiles_file)) {
   stop(
     "Missing input file: ", monthly_profiles_file, "\n",
-    "Run scripts/08_monthly_mean_deep_data.R first."
+    "Run script 08_0 first."
   )
 }
 
@@ -416,10 +401,11 @@ if (length(smoothed_list) > 1) {
 
 months_label <- make_months_label(profile_smooth_months)
 mode_label <- if (seasonal_average_first) "seasonal" else "monthly"
+method_label <- tolower(smooth_method)
 
 smoothed_output_file <- file.path(
   outputPath,
-  paste0("monthly_mean_profiles_1m_", mode_label, "_GAM_smoothed_months_", months_label, ".csv")
+  paste0("monthly_mean_profiles_1m_", mode_label, "_", method_label, "_smoothed_months_", months_label, ".csv")
 )
 
 data.table::fwrite(smoothed_profiles, smoothed_output_file)
@@ -433,14 +419,14 @@ plot_smoothed_profile_panels <- function(data,
                                          months_label,
                                          mode_label,
                                          output_dir,
-                                         width = 14,
-                                         height = 8,
-                                         dpi = 300,
-                                         palette = "parula") {
+                                         width = figure_width,
+                                         height = figure_height,
+                                         dpi = figure_dpi,
+                                         palette = profile_colour_palette) {
   
   panel_specs <- list(
     list(column = "Oxygen_mgl_smoothed", title = "Oxygen", legend_title = "mg/l", reverse_palette = TRUE),
-    list(column = "Oxygen_debt_mgl_H2S_NH4_smoothed", title = "Oxygen debt, H2S + NH4", legend_title = "mg/l", reverse_palette = FALSE),
+    list(column = "Oxygen_debt_mgl_H2S_NH4_smoothed", title = "Oxygen deficiency, H2S", legend_title = "mg/l", reverse_palette = FALSE),
     list(column = "Temperature_degreesC_smoothed", title = "Temperature", legend_title = "degrees C", reverse_palette = FALSE),
     list(column = "Salinity_psu_smoothed", title = "Salinity", legend_title = "psu", reverse_palette = FALSE)
   )
@@ -535,7 +521,7 @@ plot_smoothed_profile_panels <- function(data,
   
   output_file <- file.path(
     output_dir,
-    paste0("FIG_monthly_mean_profiles_1m_", mode_label, "_GAM_smoothed_months_", months_label, ".jpg")
+    paste0("FIG_monthly_mean_profiles_1m_", mode_label, "_", method_label, "_smoothed_months_", months_label, ".jpg")
   )
   
   grDevices::jpeg(

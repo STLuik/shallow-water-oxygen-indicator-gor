@@ -4,10 +4,10 @@
 #
 # Purpose:
 #   Calculate EQR and EQRS scaled indicator values for the Gulf of Riga open sea
-#   deep oxygen indicator using the selected deep yearly values from script 08_3.
+#   oxygen indicator using the selected deep yearly values from script 08_3.
 #
 # Inputs:
-#   - deep_measured_profile_deepest_seasonal_average_values_wide_extra_TS_min40m_<mode>_<method>_months_07_08_09.csv
+#   - deep_measured_profile_deepest_seasonal_average_values_wide_extra_TS_min<configured_depth>m_<mode>_<method>_months_<configured_months>.csv
 #     created by script 08_3.
 #
 # Logic:
@@ -21,11 +21,11 @@
 #       * Oxygen debt BEST = 10th percentile of selected deep DO_debt_measured_mgl.
 #
 # Outputs:
-#   - EQRS_yearly_DO_and_DO_debt_min40m_<mode>_<method>_months_07_08_09.csv
-#   - EQRS_final_result_DO_and_DO_debt_min40m_<mode>_<method>_months_07_08_09.csv
-#   - EQRS_BEST_values_DO_and_DO_debt_baseline_1980_2010_min40m_<mode>_<method>_months_07_08_09.csv
-#   - FIG_EQRS_yearly_DO_and_DO_debt_class_background_period_averages_min40m_<mode>_<method>_months_07_08_09.jpg
-#   - EQRS_period_averages_DO_and_DO_debt_min40m_<mode>_<method>_months_07_08_09.csv
+#   - EQRS_yearly_DO_and_DO_debt_min<configured_depth>m_<mode>_<method>_months_<configured_months>.csv
+#   - EQRS_final_result_DO_and_DO_debt_min<configured_depth>m_<mode>_<method>_months_<configured_months>.csv
+#   - EQRS_BEST_values_DO_and_DO_debt_baseline_<baseline>_min<configured_depth>m_<mode>_<method>_months_<configured_months>.csv
+#   - FIG_EQRS_yearly_DO_and_DO_debt_class_background_period_averages_min<configured_depth>m_<mode>_<method>_months_<configured_months>.jpg
+#   - EQRS_period_averages_DO_and_DO_debt_min<configured_depth>m_<mode>_<method>_months_<configured_months>.csv
 
 options(project_clean_workspace = FALSE)
 
@@ -37,63 +37,54 @@ if (is.null(getOption("project_assessment"))) {
 
 assessment <- getOption("project_assessment")
 
+if (is.null(assessment$settings_file) || !file.exists(assessment$settings_file)) {
+  source("scripts/03_define_assessment.R")
+  assessment <- getOption("project_assessment")
+}
+
+assessment <- readRDS(assessment$settings_file)
+options(project_assessment = assessment)
+
+if (is.null(assessment$indicator)) {
+  stop("The assessment settings object does not contain indicator settings. Run scripts/03_define_assessment.R first.")
+}
+
+indicator <- assessment$indicator
+
 # Define paths.
-inputPath <- "Input/master"
+inputPath <- assessment$master_input_dir
 outputPath <- assessment$output_dir
 
 # Remove unnecessary data/values/functions.
 keep <- c(
-  "assessment", "outputPath", "inputPath", "proj",
+  "assessment", "indicator", "outputPath", "inputPath", "proj",
   "repo_url", "O2satFun", "auxilliaryFile"
 )
 
 rm(list = setdiff(ls(envir = .GlobalEnv), keep), envir = .GlobalEnv)
 
 #-------------------------------------------------------------------------------
-# USER SETTINGS
+# SETTINGS FROM scripts/03_define_assessment.R
 
-# These settings should match script 08_3.
-profile_months <- 7:9
-seasonal_average_first <- TRUE
-smooth_method <- "gam"
-deepest_min_depth_m <- 40
+profile_months <- indicator$eqrs$profile_months
+seasonal_average_first <- indicator$eqrs$seasonal_average_first
+smooth_method <- indicator$eqrs$smooth_method
+deepest_min_depth_m <- indicator$eqrs$deepest_min_depth_m
+bottom_suffix <- indicator$near_bottom$bottom_suffix
 
-# BEST baseline period.
-best_baseline_start_year <- 1980
-best_baseline_end_year <- 2010
+best_baseline_start_year <- indicator$eqrs$best_baseline_start_year
+best_baseline_end_year <- indicator$eqrs$best_baseline_end_year
+ACCDEV <- indicator$eqrs$ACCDEV
+final_result_year <- indicator$eqrs$final_result_year
+cap_eqrs_to_0_1 <- indicator$eqrs$cap_eqrs_to_0_1
+use_continuous_upper_eqrs_class <- indicator$eqrs$use_continuous_upper_eqrs_class
 
-# Acceptable deviation.
-ACCDEV <- 25
-
-# If NA, the final-result table uses the latest year with a non-NA value for
-# each parameter. Set to a specific year, for example 2025, if needed.
-final_result_year <- NA_integer_
-
-# Keep EQRS on the usual 0-1 scale.
-cap_eqrs_to_0_1 <- TRUE
-
-# Use a continuous upper EQRS class: EQR_HG -> 0.8 and EQR = 1 -> 1.0.
-# The pasted formula for the final class appears to miss the +0.8 intercept;
-# set this to FALSE only if you need the pasted final-class line literally.
-use_continuous_upper_eqrs_class <- TRUE
-
-# EQRS figure settings.
-eqrs_plot_start_year <- 1980
-eqrs_period_averages <- data.table::data.table(
-  period = c("2011-2016", "2016-2021"),
-  start_year = c(2011L, 2016L),
-  end_year = c(2016L, 2021L)
-)
-
-# Parameters to calculate.
-eqrs_parameters <- data.table::data.table(
-  parameter = c("Oxygen", "Oxygen debt"),
-  measured_column = c("Oxygen_mgl", "DO_debt_measured_mgl"),
-  units = c("mg/l", "mg/l"),
-  response = c(">=", "<="),
-  best_percentile_probability = c(0.90, 0.10),
-  best_percentile_label = c("p90", "p10")
-)
+eqrs_plot_start_year <- indicator$eqrs$eqrs_plot_start_year
+eqrs_figure_width <- indicator$eqrs$figure_width
+eqrs_figure_height <- indicator$eqrs$figure_height
+eqrs_figure_dpi <- indicator$eqrs$figure_dpi
+eqrs_period_averages <- data.table::as.data.table(indicator$eqrs$period_averages)
+eqrs_parameters <- data.table::as.data.table(indicator$eqrs$parameters)
 
 #-------------------------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -262,6 +253,8 @@ exact_input_candidates <- file.path(
     method_label_candidates,
     "_months_",
     months_label,
+    "_",
+    bottom_suffix,
     ".csv"
   )
 )
@@ -372,6 +365,8 @@ best_values_output_file <- file.path(
     tolower(smooth_method),
     "_months_",
     months_label,
+    "_",
+    bottom_suffix,
     ".csv"
   )
 )
@@ -458,6 +453,8 @@ eqrs_yearly_output_file <- file.path(
     tolower(smooth_method),
     "_months_",
     months_label,
+    "_",
+    bottom_suffix,
     ".csv"
   )
 )
@@ -513,6 +510,8 @@ eqrs_period_average_output_file <- file.path(
     tolower(smooth_method),
     "_months_",
     months_label,
+    "_",
+    bottom_suffix,
     ".csv"
   )
 )
@@ -629,6 +628,8 @@ if (nrow(eqrs_plot_data) > 0) {
       tolower(smooth_method),
       "_months_",
       months_label,
+      "_",
+      bottom_suffix,
       ".jpg"
     )
   )
@@ -636,10 +637,10 @@ if (nrow(eqrs_plot_data) > 0) {
   ggplot2::ggsave(
     filename = eqrs_figure_file,
     plot = eqrs_figure,
-    width = 9,
-    height = 7,
+    width = eqrs_figure_width,
+    height = eqrs_figure_height,
     units = "in",
-    dpi = 300
+    dpi = eqrs_figure_dpi
   )
 
   message("EQRS class-background figure saved: ", eqrs_figure_file)
@@ -710,6 +711,8 @@ eqrs_final_output_file <- file.path(
     tolower(smooth_method),
     "_months_",
     months_label,
+    "_",
+    bottom_suffix,
     ".csv"
   )
 )
@@ -735,6 +738,8 @@ eqrs_final_wide_output_file <- file.path(
     tolower(smooth_method),
     "_months_",
     months_label,
+    "_",
+    bottom_suffix,
     ".csv"
   )
 )

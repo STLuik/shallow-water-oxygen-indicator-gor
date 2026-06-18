@@ -1,5 +1,5 @@
-# scripts/08_0_monthly_mean_bottom_1m_data.R
-# This script calculates monthly means for observations 1 m from the bottom and creates supporting profile plots.
+# scripts/08_0_monthly_mean_deep_data.R
+# This script calculates monthly near-bottom means using a user-defined maximum distance from the bottom and creates supporting profile plots.
 
 options(project_clean_workspace = FALSE)
 # This prevents accidental workspace wiping when you run this script by itself during testing.
@@ -21,8 +21,93 @@ assessment <- getOption("project_assessment")
 inputPath <- "Input/master"
 outputPath <- assessment$output_dir
 
+#-------------------------------------------------------------------------------
+# USER SETTINGS
+#
+# Maximum allowed distance between the deepest measurement in a profile and the
+# bathymetry depth at that position. For example, 1 means that the profile is
+# treated as near-bottom only when the deepest measurement is max 1 m from bottom.
+bottom_depth_limit_m <- 4
+
+# Months to highlight in the monthly near-bottom oxygen figure and to use in the
+# monthly profile panel figure. The month selection is also included in the
+# near-bottom oxygen figure filename.
+# Example: profile_plot_months <- 7:10 uses July-October.
+# Example: profile_plot_months <- c(8, 9) uses August-September.
+profile_plot_months <- 7:8
+
+make_depth_limit_label <- function(x) {
+  if (length(x) != 1 || is.na(x) || !is.finite(x) || x < 0) {
+    stop("bottom_depth_limit_m must be one non-negative finite number.")
+  }
+
+  label <- format(x, trim = TRUE, scientific = FALSE)
+  label <- sub("(\\.\\d*?)0+$", "\\1", label)
+  label <- sub("\\.$", "", label)
+  gsub("\\.", "p", label)
+}
+
+make_depth_limit_text <- function(x) {
+  label <- format(x, trim = TRUE, scientific = FALSE)
+  label <- sub("(\\.\\d*?)0+$", "\\1", label)
+  label <- sub("\\.$", "", label)
+  paste0(label, " m")
+}
+
+make_months_label <- function(months) {
+  months <- sort(unique(as.integer(months)))
+  months <- months[!is.na(months) & months >= 1 & months <= 12]
+
+  if (length(months) == 0) {
+    return("selected")
+  }
+
+  paste(sprintf("%02d", months), collapse = "_")
+}
+
+make_months_text <- function(months) {
+  months <- sort(unique(as.integer(months)))
+  months <- months[!is.na(months) & months >= 1 & months <= 12]
+
+  if (length(months) == 0) {
+    return("selected months")
+  }
+
+  month_names <- month.name[months]
+
+  if (length(months) == 1) {
+    return(month_names)
+  }
+
+  if (all(diff(months) == 1)) {
+    return(paste0(month_names[1], "-", month_names[length(month_names)]))
+  }
+
+  paste(month_names, collapse = ", ")
+}
+
+bottom_depth_limit_label <- make_depth_limit_label(bottom_depth_limit_m)
+bottom_depth_limit_text <- make_depth_limit_text(bottom_depth_limit_m)
+bottom_suffix <- paste0("bottom_", bottom_depth_limit_label, "m")
+bottom_flag_col <- "deepest_within_bottom_limit_bathy"
+profile_months_suffix <- paste0("months_", make_months_label(profile_plot_months))
+
+# Output filenames that depend on the near-bottom depth limit and highlighted season.
+monthly_bottom_means_filename <- paste0("monthly_bottom_means_", bottom_suffix, ".csv")
+monthly_bottom_oxygen_figure_filename <- paste0(
+  "FIG_Oxygen_mgl_",
+  bottom_suffix,
+  "_",
+  profile_months_suffix,
+  ".jpg"
+)
+
 # Remove unnecessary data/values/functions
-keep <- c("assessment", "end_year", "start_year", "outputPath", "inputPath", "proj", "repo_url", "O2satFun","auxilliaryFile")
+keep <- c("assessment", "end_year", "start_year", "outputPath", "inputPath", "proj", "repo_url", "O2satFun","auxilliaryFile",
+          "bottom_depth_limit_m", "bottom_depth_limit_label", "bottom_depth_limit_text", "bottom_suffix", "bottom_flag_col",
+          "profile_plot_months", "profile_months_suffix",
+          "monthly_bottom_means_filename", "monthly_bottom_oxygen_figure_filename",
+          "make_depth_limit_label", "make_depth_limit_text", "make_months_label", "make_months_text")
 # List the object names you want to keep (write yours here).
 
 rm(list = setdiff(ls(envir = .GlobalEnv), keep), envir = .GlobalEnv)
@@ -199,11 +284,12 @@ message("TEOS-10 density calculated for ", length(density_rows), " rows.")
 
 #-------------------------------------------------------------------------------
 # Create columns where entire profiles are marked based on the following conditions:
-# 1. Deepest measurement (oxy$max_depth_m) is max 1 m from bathy depth (oxy$Bathy_depth_m)
-oxy[, deepest_within_1m_bathy :=
+# 1. Deepest measurement (oxy$max_depth_m) is max bottom_depth_limit_m from
+#    bathymetry depth (oxy$Bathy_depth_m).
+oxy[, (bottom_flag_col) :=
       !is.na(max_depth_m) &
       !is.na(Bathy_depth_m) &
-      (Bathy_depth_m - max_depth_m) <= 1]
+      (Bathy_depth_m - max_depth_m) <= bottom_depth_limit_m]
 
 # 2. There are at least 3 measurements per profile (oxy$n_Oxygen >= 3)
 oxy[, at_least_3_oxygen_measurements := 
@@ -360,19 +446,19 @@ make_monthly_bottom_means <- function(data, bottom_flag, suffix) {
   out
 }
 
-monthly_1m <- make_monthly_bottom_means(
+monthly_bottom <- make_monthly_bottom_means(
   data = oxy,
-  bottom_flag = "deepest_within_1m_bathy",
-  suffix = "bottom_1m"
+  bottom_flag = bottom_flag_col,
+  suffix = bottom_suffix
 )
 
-monthly_bottom_means <- monthly_1m
+monthly_bottom_means <- monthly_bottom
 
 
 # Save
 data.table::fwrite(
   monthly_bottom_means,
-  file.path(outputPath, "monthly_bottom_means.csv")
+  file.path(outputPath, monthly_bottom_means_filename)
 )
 
 
@@ -505,15 +591,7 @@ data.table::fwrite(
 #-------------------------------------------------------------------------------
 # FIGURE: MONTHLY MEAN PROFILES, 4 PANELS
 #
-# Change this object to control which months are included in the profile figure.
-# Example: profile_plot_months <- 7:10 uses July-October.
-# Example: profile_plot_months <- c(8, 9) uses August-September.
-profile_plot_months <- 7:9
-
-make_months_label <- function(months) {
-  months <- sort(unique(as.integer(months)))
-  paste0(sprintf("%02d", months), collapse = "_")
-}
+# The months used here are controlled by profile_plot_months in USER SETTINGS.
 
 make_profile_palette <- function(palette = "parula", n = 100) {
   palette <- tolower(palette)
@@ -613,7 +691,7 @@ plot_monthly_mean_profile_panels <- function(data,
     ),
     list(
       column = "Oxygen_debt_mgl_H2S_NH4",
-      title = "Oxygen debt, H2S + NH4",
+      title = "Oxygen deficiency, H2S",
       legend_title = "mg/l",
       palette = profile_colour_palette,
       reverse_palette = FALSE,
@@ -835,8 +913,11 @@ plot_monthly_scatter <- function(data,
                                  y_col = "Oxygen_mgl",
                                  y_limits = NULL,
                                  plot_title = NULL,
+                                 plot_subtitle = NULL,
+                                 season_months = NULL,
                                  units = "mg/l",
                                  output_dir,
+                                 output_filename = NULL,
                                  width = 12,
                                  height = 8,
                                  dpi = 300) {
@@ -858,17 +939,48 @@ plot_monthly_scatter <- function(data,
   x[, plot_date := as.Date(
     paste0(get(year_col), "-", sprintf("%02d", get(month_col)), "-01")
   )]
+
+  if (is.null(season_months)) {
+    season_months <- sort(unique(x[[month_col]]))
+  }
+
+  season_months <- sort(unique(as.integer(season_months)))
+  season_months <- season_months[!is.na(season_months) & season_months >= 1 & season_months <= 12]
+  x[, is_season_month := get(month_col) %in% season_months]
+
+  if (is.null(plot_subtitle)) {
+    plot_subtitle <- paste0(
+      "Filled black points = ", make_months_text(season_months),
+      "; gray-outline points = other months"
+    )
+  }
   
-  # Draw plot
+  # Draw plot. All months are shown; selected-season months are highlighted.
   p <- ggplot2::ggplot(
     x,
     ggplot2::aes(x = plot_date, y = .data[[y_col]])
   ) +
-    ggplot2::geom_point() +
+    ggplot2::geom_point(
+      data = x[is_season_month == FALSE],
+      shape = 21,
+      fill = "white",
+      colour = "gray60",
+      stroke = 0.8,
+      size = 2.2
+    ) +
+    ggplot2::geom_point(
+      data = x[is_season_month == TRUE],
+      shape = 21,
+      fill = "black",
+      colour = "black",
+      stroke = 0.4,
+      size = 2.2
+    ) +
     ggplot2::labs(
       x = "Date",
       y = paste0(y_col, " (", units, ")"),
-      title = plot_title
+      title = plot_title,
+      subtitle = plot_subtitle
     ) +
     ggplot2::theme_bw()
   
@@ -877,10 +989,14 @@ plot_monthly_scatter <- function(data,
     p <- p + ggplot2::coord_cartesian(ylim = y_limits)
   }
   
-  # Save plot using y_col as filename
+  # Save plot using a dynamic filename when supplied.
+  if (is.null(output_filename)) {
+    output_filename <- paste0("FIG_", y_col, ".jpg")
+  }
+
   plot_file <- file.path(
     output_dir,
-    paste0("FIG_", y_col, ".jpg")
+    output_filename
   )
   
   ggplot2::ggsave(
@@ -897,15 +1013,26 @@ plot_monthly_scatter <- function(data,
 # Write out monthly data
 data.table::fwrite(
   monthly_bottom_means,
-  file.path(outputPath, "monthly_bottom_means.csv")
+  file.path(outputPath, monthly_bottom_means_filename)
 )
 
 # Plot figures using the function above
 plot_monthly_scatter(
   data = monthly_bottom_means,
-  y_col = "Oxygen_mgl_bottom_1m",
+  y_col = paste0("Oxygen_mgl_", bottom_suffix),
   y_limits = c(0, 15),
-  plot_title = "Monthly mean near-bottom oxygen, max 1 m from bottom",
+  plot_title = paste0(
+    "Monthly mean near-bottom oxygen, max ",
+    bottom_depth_limit_text,
+    " from bottom"
+  ),
+  plot_subtitle = paste0(
+    "Filled black points = ",
+    make_months_text(profile_plot_months),
+    "; gray-outline points = other months"
+  ),
+  season_months = profile_plot_months,
   units = "mg/l",
-  output_dir = outputPath
+  output_dir = outputPath,
+  output_filename = monthly_bottom_oxygen_figure_filename
 )

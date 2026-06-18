@@ -1,6 +1,6 @@
 # scripts/08_2_model_validation.R
 # This script validates the smoothed seasonal/monthly profile fields created by
-# scripts/08_2_smooth_seasonal_profiles.R.
+# scripts/08_1_smooth_seasonal_profiles.R.
 #
 # It compares the input values used by the smoother with the matching smoothed
 # values at the same time-depth grid points.
@@ -20,38 +20,43 @@ if (is.null(getOption("project_assessment"))) {
 
 assessment <- getOption("project_assessment")
 
+if (is.null(assessment$settings_file) || !file.exists(assessment$settings_file)) {
+  source("scripts/03_define_assessment.R")
+  assessment <- getOption("project_assessment")
+}
+
+assessment <- readRDS(assessment$settings_file)
+options(project_assessment = assessment)
+
+if (is.null(assessment$indicator)) {
+  stop("The assessment settings object does not contain indicator settings. Run scripts/03_define_assessment.R first.")
+}
+
+indicator <- assessment$indicator
+
 # Define paths
-inputPath <- "Input/master"
+inputPath <- assessment$master_input_dir
 outputPath <- assessment$output_dir
 
 # Remove unnecessary data/values/functions
 keep <- c(
-  "assessment", "outputPath", "inputPath", "proj",
+  "assessment", "indicator", "outputPath", "inputPath", "proj",
   "repo_url", "O2satFun", "auxilliaryFile"
 )
 
 rm(list = setdiff(ls(envir = .GlobalEnv), keep), envir = .GlobalEnv)
 
 #-------------------------------------------------------------------------------
-# USER SETTINGS
+# SETTINGS FROM scripts/03_define_assessment.R
 
-# These settings should match scripts/08_2_smooth_seasonal_profiles.R.
-profile_smooth_months <- 7:9
-seasonal_average_first <- TRUE
-smooth_method <- "gam"
+profile_smooth_months <- indicator$validation$profile_smooth_months
+seasonal_average_first <- indicator$validation$seasonal_average_first
+smooth_method <- indicator$validation$smooth_method
+validation_variables <- indicator$validation$validation_variables
 
-# Variables to validate.
-validation_variables <- c(
-  "Oxygen_mgl",
-  "Oxygen_debt_mgl_H2S_NH4",
-  "Temperature_degreesC",
-  "Salinity_psu"
-)
-
-# Figure settings.
-figure_width <- 12
-figure_height <- 8
-figure_dpi <- 300
+figure_width <- indicator$validation$figure_width
+figure_height <- indicator$validation$figure_height
+figure_dpi <- indicator$validation$figure_dpi
 
 #-------------------------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -91,7 +96,7 @@ safe_lm_stats <- function(observed, smoothed) {
 
 months_label <- make_months_label(profile_smooth_months)
 mode_label <- if (seasonal_average_first) "seasonal" else "monthly"
-method_label <- smooth_method
+method_label <- tolower(smooth_method)
 
 smoothed_profiles_file <- file.path(
   outputPath,
@@ -109,7 +114,7 @@ smoothed_profiles_file <- file.path(
 if (!file.exists(smoothed_profiles_file)) {
   stop(
     "Missing input file: ", smoothed_profiles_file, "\n",
-    "Run scripts/08_2_smooth_seasonal_profiles.R first, or check that the settings in this script match script 08_2."
+    "Run script 08_1 first, or check that the settings in scripts/03_define_assessment.R match the available smoothed-profile file."
   )
 }
 
@@ -297,10 +302,13 @@ yearly_validation_metrics[
   r2_correlation := correlation^2
 ]
 
-data.table::fwrite(
-  yearly_validation_metrics,
-  file.path(outputPath, "model_validation_metrics_by_year.csv")
+yearly_validation_metrics_file <- file.path(
+  outputPath,
+  paste0("model_validation_metrics_by_year_", mode_label, "_", method_label, "_months_", months_label, ".csv")
 )
+
+data.table::fwrite(yearly_validation_metrics, yearly_validation_metrics_file)
+message("Yearly validation metrics saved: ", yearly_validation_metrics_file)
 
 
 #-------------------------------------------------------------------------------
